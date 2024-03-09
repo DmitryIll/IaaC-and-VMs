@@ -278,9 +278,48 @@ cat /etc/*release
 
 ### Решение
 
-1. Отредактировал mydebian.json.pkr.hcl добавил код установки docker для создания образа через packer:
+* Сейчас пока в облаке нет своих имаджей:
+```
+yc compute image list
+```
+![alt text](image-28.png)
+
+
+* Создам сеть и подсеть:
 
 ```
+yc vpc network create --name net --labels my-label=my-net --description "My network"
+```
+![alt text](image-29.png)
+
+Создаем подсеть:
+
+```
+yc vpc subnet create --name my-subnet-b --zone ru-central1-b --range 10.1.2.0/24 --network-name net --description "My subnet"
+```
+![alt text](image-30.png)
+
+ID сети:
+e2lmhdqcqkrquqlc3ae2
+
+Создадим свой имадж с докером.
+
+1. Отредактировал mydebian.json.pkr.hcl добавил код установки docker для создания образа через packer, и указал данны еоблака:
+
+```
+source "yandex" "debian_docker" {
+  disk_type           = "network-hdd"
+  folder_id           = "${file("./folderid")}"
+  image_description   = "my custom debian with docker"
+  image_name          = "debian-11-docker"
+  source_image_family = "debian-11"
+  ssh_username        = "debian"
+  subnet_id           = "e2lmhdqcqkrquqlc3ae2"
+  token               = "${file("./yctoken")}"
+  use_ipv4_nat        = true
+  zone                = "ru-central1-b"
+}
+
 build {
   sources = ["source.yandex.debian_docker"]
 
@@ -292,11 +331,61 @@ build {
               "sudo install -m 0755 -d /etc/apt/keyrings",
               "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg",
               "sudo chmod a+r /etc/apt/keyrings/docker.gpg",
-              "echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable\" |  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null",
+              "echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.>
               "sudo apt-get update",
               "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
     ]
   }
+
 }
 ```
+Проверил валидность:
 
+```
+packer validate mydebian.json.pkr.hcl
+```
+![alt text](image-31.png)
+
+Но, при сборке оказалось что это не работает:
+```
+  folder_id           = "${file("./folderid")}"
+  token               = "${file("./yctoken")}"
+```
+
+Поэтому просто заменил на код сразу - заработало:
+
+После этого уже что-то заработало, но, сошибками:
+![alt text](image-32.png)
+
+
+![alt text](image-33.png)
+
+Попробовал убрал код установки докера и прошло без ошибок:
+
+![alt text](image-34.png)
+
+Попробовал заменить код установки докера - для дебиана:
+
+```
+  provisioner "shell" {
+    inline = ["echo 'hello from packer'",
+              "sudo apt-get update",
+              "sudo apt-get install ca-certificates curl",
+              "sudo install -m 0755 -d /etc/apt/keyrings",
+              "sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc",
+              "sudo chmod a+r /etc/apt/keyrings/docker.asc",
+              "echo \
+                \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+                $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable\" | \
+                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null",
+              "sudo apt-get update",
+              "sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+    ]
+  }
+```
+
+Но, не особо помогло, все равно ошибка.
+
+![alt text](image-35.png)
+
+Больше нет времени разбираться, оставляю так.
